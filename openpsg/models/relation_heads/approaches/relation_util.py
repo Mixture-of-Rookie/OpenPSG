@@ -74,6 +74,7 @@ class Result(object):
         # use in causal head or VCTree, for recording auxiliary loss
         head_spec_losses=None,  # For method-specific loss
         pan_results=None,
+        query_feats=None,
     ):
         self.__dict__.update(locals())
         del self.__dict__['self']

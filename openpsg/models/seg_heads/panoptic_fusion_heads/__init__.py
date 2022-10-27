@@ -1,0 +1,2 @@
+from .maskformer_fusion_head import PSGMaskFormerFusionHead
+from .psg_maskformer_fusion_head import SegmentPSGMaskFormerFusionHead

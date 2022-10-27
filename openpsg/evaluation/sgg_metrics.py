@@ -276,6 +276,83 @@ class SGRecall(SceneGraphEvaluation):
 
 
 """
+Background Recall.
+Compute recall for background-related and background-unrelated predicates.
+"""
+class SGBackgroundRecall(SceneGraphEvaluation):
+    def __init__(self, *args, **kwargs):
+        self.num_thing_classes = kwargs.pop('num_thing_classes')
+        self.num_stuff_classes = kwargs.pop('num_stuff_classes')
+        super(SGBackgroundRecall, self).__init__(*args, **kwargs)
+
+    def register_container(self, mode):
+        self.result_dict[mode + '_background_recall'] = {
+            20: [], 50: [], 100: []
+        }
+        self.result_dict[mode + '_unbackground_recall'] = {
+            20: [], 50: [], 100: []
+        }
+
+    def _calculate_single(self, target_dict, prediction_to_gt, gt_triplets, mode):
+        bg_target = target_dict[mode + '_background_recall']
+        unbg_target = target_dict[mode + '_unbackground_recall']
+
+        bg_gt_ind = np.logical_and(
+            gt_triplets[:, 0] >= self.num_thing_classes,
+            gt_triplets[:, 2] >= self.num_thing_classes,
+        )
+        unbg_gt_ind = np.logical_and(
+            gt_triplets[:, 0] < self.num_thing_classes,
+            gt_triplets[:, 2] < self.num_thing_classes
+        )
+
+        num_bg_gt = np.where(bg_gt_ind)[0].shape[0]
+        num_unbg_gt = np.where(unbg_gt_ind)[0].shape[0]
+        # num_bg_gt = gt_triplets.shape[0] - num_unbg_gt
+
+        for k in bg_target:
+            match = reduce(np.union1d, prediction_to_gt[:k])
+            if type(match) == list:
+                num_bg_pred = 0
+                num_unbg_pred = 0
+            else:
+                match = match.astype('int32')
+                num_bg_pred = np.where(bg_gt_ind[match])[0].shape[0]
+                num_unbg_pred = np.where(unbg_gt_ind[match])[0].shape[0]
+                # num_bg_pred = len(match) - num_unbg_pred
+
+            if num_bg_gt != 0:
+                bg_target[k].append(float(num_bg_pred / num_bg_gt))
+
+            if num_unbg_gt != 0:
+                unbg_target[k].append(float(num_unbg_pred / num_unbg_gt))
+
+    def _print_single(self, target_dict, mode):
+        bg_target = target_dict[mode + '_background_recall']
+        unbg_target = target_dict[mode + '_unbackground_recall']
+        result_str = 'SGG background eval:'
+        for k, v in bg_target.items():
+            result_str += ' BG R @ %d: %.4f ' % (k, np.mean(v))
+        for k, v in unbg_target.items():
+            result_str += ' UnBG R @ %d: %.4f ' % (k, np.mean(v))
+        suffix_type = 'Background Recall.'
+        result_str += ' for mode=%s, type=%s' % (mode, suffix_type)
+        result_str += '\n'
+        return result_str
+
+    def generate_print_string(self, mode):
+        result_str = self._print_single(self.result_dict, mode)
+        return result_str
+
+    def calculate_recall(self, global_container, local_container, mode):
+        if mode == 'sgdet':
+            pred_to_gt = local_container['pred_to_gt']
+            gt_triplets = local_container['gt_triplets']
+
+            self._calculate_single(self.result_dict, pred_to_gt, gt_triplets, mode)
+
+
+"""
 No Graph Constraint Recall, implement based on:
 https://github.com/rowanz/neural-motifs
 """

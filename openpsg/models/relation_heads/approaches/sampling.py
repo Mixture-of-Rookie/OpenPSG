@@ -12,6 +12,7 @@ import numpy.random as npr
 import torch
 from mmdet.core import bbox_overlaps
 from torch.nn import functional as F
+from mmdet.core import BitmapMasks
 
 # from maskrcnn_benchmark.modeling.box_coder import BoxCoder
 # from maskrcnn_benchmark.structures.boxlist_ops import boxlist_iou
@@ -38,6 +39,10 @@ class RelationSampler(object):
         self.use_gt_box = use_gt_box
         self.test_overlap = test_overlap
         self.key_sample = key_sample
+
+        # for diagnose how many rels are used for training
+        self.num_hit = 0.
+        self.num_total = 0.
 
     def prepare_test_pairs(self, det_result):
         # prepare object pairs for relation prediction
@@ -215,6 +220,72 @@ class RelationSampler(object):
         else:
             return rel_labels, rel_idx_pairs, rel_sym_binarys
 
+
+    def segm_relsample(self, det_result, gt_result):
+        # corresponding to rel_assignments function in neural-motifs
+        """
+        The input proposals are already processed by subsample function of box_head,
+        in this function, we should only care about fg box, and sample corresponding fg/bg relations
+        Note: this function keeps a state.
+
+        Arguments:
+            proposals (list[BoxList])  contain fields: labels, boxes(5 columns)
+            targets (list[BoxList]) contain fields: labels
+        """
+        if self.type == 'Motif':
+            sampling_function = self.motif_rel_fg_bg_sampling
+        else:
+            raise NotImplementedError
+        masks, labels = det_result.masks, det_result.labels
+        gt_masks, gt_labels, gt_relmaps, gt_rels, gt_keyrels = gt_result.masks, gt_result.labels, gt_result.relmaps,\
+                                                               gt_result.rels, gt_result.key_rels
+        device = gt_labels[0].device
+        self.num_pos_per_img = int(self.num_rel_per_image * self.pos_fraction)
+        rel_idx_pairs = []
+        rel_labels = []
+        rel_sym_binarys = []
+        key_rel_labels = []
+        if gt_keyrels is None:
+            gt_keyrels = [None] * len(gt_labels)
+        for img_id, (prp_mask, prp_lab, tgt_mask, tgt_lab, tgt_rel_matrix,
+                     tgt_rel, tgt_keyrel) in enumerate(
+                         zip(masks, labels, gt_masks, gt_labels, gt_relmaps,
+                             gt_rels, gt_keyrels)):
+            # IoU matching
+            ious = mask_overlaps(tgt_mask, prp_mask, device)
+            is_match = (tgt_lab[:, None] == prp_lab[None]) & (
+                ious > self.pos_iou_thr)  # [tgt, prp]
+            if self.require_overlap and (not self.use_gt_box):
+                # Proposal self IoU to filter non-overlap
+                prp_self_iou = bbox_overlaps(prp_mask,
+                                             prp_mask)  # [prp, prp]
+                rel_possibility = (prp_self_iou > 0) & (
+                    prp_self_iou < 1)  # not self & intersect
+            else:
+                num_prp = prp_lab.shape[0]
+                rel_possibility = torch.ones(
+                    (num_prp, num_prp), device=device).long() - torch.eye(
+                        num_prp, device=device).long()
+            # only select relations between fg proposals
+            rel_possibility[prp_lab == 0] = 0
+            rel_possibility[:, prp_lab == 0] = 0
+
+            img_rel_triplets, binary_rel = sampling_function(
+                device, tgt_rel_matrix, tgt_rel, tgt_keyrel, ious, is_match,
+                rel_possibility)
+            rel_idx_pairs.append(
+                img_rel_triplets[:, :2])  # (num_rel, 2),  (sub_idx, obj_idx)
+            rel_labels.append(img_rel_triplets[:, 2])  # (num_rel, )
+            if tgt_keyrel is not None:
+                key_rel_labels.append(img_rel_triplets[:, -1])
+            rel_sym_binarys.append(binary_rel)
+
+        if self.key_sample:
+            return rel_labels, rel_idx_pairs, rel_sym_binarys, key_rel_labels
+        else:
+            return rel_labels, rel_idx_pairs, rel_sym_binarys
+
+
     def motif_rel_fg_bg_sampling(self, device, tgt_rel_matrix, tgt_rel,
                                  tgt_keyrel, ious, is_match, rel_possibility):
         """
@@ -324,6 +395,9 @@ class RelationSampler(object):
             if fg_rel_i.shape[0] > 0:
                 fg_rel_triplets.append(fg_rel_i)
 
+        self.num_hit += len(fg_rel_triplets)
+        self.num_total += num_tgt_rels
+
         # select fg relations
         if len(fg_rel_triplets) == 0:
             col = 4 if self.key_sample else 3
@@ -373,3 +447,39 @@ class RelationSampler(object):
                 bg_rel_triplets[0, -1] = -1
 
         return torch.cat((fg_rel_triplets, bg_rel_triplets), dim=0), binary_rel
+
+
+def mask_overlaps(masks1, masks2, device=None):
+    """Computes IoU overlaps between two sets of masks.
+    masks1, masks2: [Height, Width, instances]
+    """
+    if isinstance(masks1, BitmapMasks):
+        masks1 = masks1.masks
+
+    if isinstance(masks2, BitmapMasks):
+        masks2 = masks2.masks
+
+    masks1 = torch.from_numpy(masks1).to(device)
+    masks2 = torch.from_numpy(masks2).to(device)
+    masks1 = masks1.permute((1, 2, 0))
+    masks2 = masks2.permute((1, 2, 0))
+
+    assert masks1.shape[0] == masks2.shape[0] and \
+            masks1.shape[1] == masks2.shape[1]
+
+    # If either set of masks is empty return empty result
+    if masks1.shape[-1] == 0 or masks2.shape[-1] == 0:
+        return torch.zeros((masks1.shape[-1], masks2.shape[-1])).to(device)
+
+    # flatten masks and compute their areas
+    masks1 = torch.reshape(masks1 > .5, (-1, masks1.shape[-1])).float()
+    masks2 = torch.reshape(masks2 > .5, (-1, masks2.shape[-1])).float()
+    area1 = masks1.sum(0)
+    area2 = masks2.sum(0)
+
+    # intersections and union
+    intersections = torch.mm(masks1.T, masks2)
+    union = area1[:, None] + area2[None, :] - intersections
+    overlaps = intersections / union
+
+    return overlaps

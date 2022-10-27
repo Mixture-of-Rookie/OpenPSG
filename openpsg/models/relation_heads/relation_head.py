@@ -22,6 +22,7 @@ class RelationHead(BaseModule):
         object_classes,
         predicate_classes,
         head_config,
+        expt_name,
         bbox_roi_extractor=None,
         relation_roi_extractor=None,
         relation_sampler=None,
@@ -44,6 +45,7 @@ class RelationHead(BaseModule):
         self.use_bias = use_bias
         self.num_classes = num_classes
         self.num_predicates = num_predicates
+        self.expt_name = expt_name
 
         # upgrade some submodule attribute to this head
         self.head_config = head_config
@@ -187,6 +189,13 @@ class RelationHead(BaseModule):
             else:
                 rel_labels, rel_pair_idxes, rel_matrix = sample_res
                 key_rel_labels = None
+
+                with open('imp_panoptic_r50_det_labels.txt', 'a+') as f:
+                    for i, meta in enumerate(img_meta):
+                        filename = meta['ori_filename']
+                        hit = min(len(torch.nonzero(rel_labels[i])), len(gt_result.rel_labels[i]))
+                        total = len(gt_result.rel_labels[i])
+                        f.write(filename + ' ' + str(hit) + ' ' + str(total) + '\n')
         else:
             rel_labels, rel_matrix, key_rel_labels = None, None, None
             rel_pair_idxes = self.relation_sampler.prepare_test_pairs(
@@ -293,6 +302,13 @@ class RelationHead(BaseModule):
         )
 
         losses = dict()
+        
+        # for diagnose how many rels are used for training
+        num_hit = self.relation_sampler.num_hit
+        num_total = self.relation_sampler.num_total
+        losses['hit_percent'] = torch.tensor(num_hit /
+                                             num_total).to(obj_scores.device)
+
         if self.with_loss_object and obj_scores is not None:
             # fix: the val process
             if isinstance(target_labels, (tuple, list)):

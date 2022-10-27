@@ -400,6 +400,8 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
                 # predicate_freq=self.predicate_freq,
                 nogc_thres_num=nogc_thres_num,
                 detection_method=detection_method,
+                num_thing_classes=len(self.THING_CLASSES),
+                num_stuff_classes=len(self.STUFF_CLASSES),
             )
 
     def get_statistics(self):

@@ -17,7 +17,7 @@ from mmcv.utils import print_log
 
 from .sgg_metrics import (SGAccumulateRecall, SGMeanRecall,
                           SGNoGraphConstraintRecall, SGPairAccuracy, SGRecall,
-                          SGZeroShotRecall)
+                          SGZeroShotRecall, SGBackgroundRecall)
 
 
 def sgg_evaluation(
@@ -31,6 +31,8 @@ def sgg_evaluation(
     predicate_freq=None,
     nogc_thres_num=None,
     detection_method='bbox',
+    num_thing_classes=80,
+    num_stuff_classes=53,
 ):
     modes = mode if isinstance(mode, list) else [mode]
     result_container = dict()
@@ -50,6 +52,8 @@ def sgg_evaluation(
             predicate_freq,
             nogc_thres_num,
             detection_method,
+            num_thing_classes,
+            num_stuff_classes,
         )
         result_container.update(single_result_dict)
     return result_container
@@ -66,6 +70,8 @@ def vg_evaluation_single(
     predicate_freq=None,
     nogc_thres_num=None,
     detection_method='bbox',
+    num_thing_classes=80,
+    num_stuff_classes=53,
 ):
     # # get zeroshot triplet
     num_predicates = len(ind_to_predicates)
@@ -90,6 +96,16 @@ def vg_evaluation_single(
                            detection_method=detection_method)
     eval_recall.register_container(mode)
     evaluator['eval_recall'] = eval_recall
+
+    # background Recall@K
+    background_eval_recall = SGBackgroundRecall(result_dict,
+                                                nogc_result_dict,
+                                                nogc_thres_num,
+                                                detection_method=detection_method,
+                                                num_thing_classes=num_thing_classes,
+                                                num_stuff_classes=num_stuff_classes)
+    background_eval_recall.register_container(mode)
+    evaluator['eval_background_recall'] = background_eval_recall
 
     # used by https://github.com/NVIDIA/ContrastiveLosses4VRD for sgcls and predcls
     eval_pair_accuracy = SGPairAccuracy(result_dict, nogc_result_dict,
@@ -136,6 +152,7 @@ def vg_evaluation_single(
 
     # print result
     result_str += eval_recall.generate_print_string(mode)
+    result_str += background_eval_recall.generate_print_string(mode)
     result_str += eval_mean_recall.generate_print_string(mode, predicate_freq)
     if mode != 'sgdet':
         result_str += eval_pair_accuracy.generate_print_string(mode)
@@ -163,6 +180,18 @@ def format_result_dict(result_dict, result_str, mode):
         formatted[mode + '_recall_' + 'R_%d' % k] = np.mean(v)
         copy_stat_str += (mode + '_recall_' + 'R_%d: ' % k +
                           '{:0.3f}'.format(np.mean(v)) + '\n')
+
+    # Background Recall
+    for k, v in result_dict[mode + '_background_recall'].items():
+        formatted[mode + '_background_recall_' + 'R_%d' % k] = np.mean(v)
+        copy_stat_str += (mode + '_background_recall_' + 'R_%d: ' % k +
+                          '{:0.3f}'.format(np.mean(v)) + '\n')
+
+    for k, v in result_dict[mode + '_unbackground_recall'].items():
+        formatted[mode + '_unbackground_recall_' + 'R_%d' % k] = np.mean(v)
+        copy_stat_str += (mode + '_unbackground_recall_' + 'R_%d: ' % k +
+                          '{:0.3f}'.format(np.mean(v)) + '\n')
+
     # mean recall
     for k, v in result_dict[mode + '_mean_recall'].items():
         formatted[mode + '_mean_recall_' + 'mR_%d' % k] = float(v)
@@ -280,6 +309,10 @@ def evaluate_relation_of_one_image(groundtruth, prediction, global_container,
     # NOTE: this is the MAIN evaluation function, it must be run first
     # (several important variables need to be update)
     local_container = evaluator['eval_recall'].calculate_recall(
+        global_container, local_container, mode)
+
+    # Background Recall
+    evaluator['eval_background_recall'].calculate_recall(
         global_container, local_container, mode)
 
     # No Graph Constraint
