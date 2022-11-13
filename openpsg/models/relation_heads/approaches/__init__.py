@@ -6,3 +6,5 @@ from .relation_ranker import get_weak_key_rel_labels
 from .relation_util import PostProcessor, Result
 from .sampling import RelationSampler
 from .vctree import VCTreeLSTMContext
+from .rtpb import GTransformerContext, BaseTransformerEncoder
+from .transformer import TransformerContext

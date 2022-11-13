@@ -189,13 +189,6 @@ class RelationHead(BaseModule):
             else:
                 rel_labels, rel_pair_idxes, rel_matrix = sample_res
                 key_rel_labels = None
-
-                with open('imp_panoptic_r50_det_labels.txt', 'a+') as f:
-                    for i, meta in enumerate(img_meta):
-                        filename = meta['ori_filename']
-                        hit = min(len(torch.nonzero(rel_labels[i])), len(gt_result.rel_labels[i]))
-                        total = len(gt_result.rel_labels[i])
-                        f.write(filename + ' ' + str(hit) + ' ' + str(total) + '\n')
         else:
             rel_labels, rel_matrix, key_rel_labels = None, None, None
             rel_pair_idxes = self.relation_sampler.prepare_test_pairs(
