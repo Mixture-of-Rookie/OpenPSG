@@ -13,7 +13,7 @@ from openpsg.models.relation_heads.approaches import Result
 from openpsg.utils.utils import adjust_text_color, draw_text, get_colormap
 
 
-def triplet2Result(triplets, use_mask, eval_pan_rels=True):
+def triplet2Result(triplets, use_mask, eval_pan_rels=False):
     if use_mask:
         bboxes, labels, rel_pairs, masks, pan_rel_pairs, pan_seg, complete_r_labels, complete_r_dists, \
             r_labels, r_dists, pan_masks, rels, pan_labels \

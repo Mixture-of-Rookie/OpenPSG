@@ -22,7 +22,6 @@ class RelationHead(BaseModule):
         object_classes,
         predicate_classes,
         head_config,
-        expt_name,
         bbox_roi_extractor=None,
         relation_roi_extractor=None,
         relation_sampler=None,
@@ -45,7 +44,6 @@ class RelationHead(BaseModule):
         self.use_bias = use_bias
         self.num_classes = num_classes
         self.num_predicates = num_predicates
-        self.expt_name = expt_name
 
         # upgrade some submodule attribute to this head
         self.head_config = head_config
