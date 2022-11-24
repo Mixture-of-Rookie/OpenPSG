@@ -12,7 +12,6 @@ model = dict(
             use_gt_box=False,
             use_gt_label=False,
         ),
-        expt_name=expt_name,
     ),
     roi_head=dict(bbox_head=dict(type='SceneGraphBBoxHead'), ),
 )
