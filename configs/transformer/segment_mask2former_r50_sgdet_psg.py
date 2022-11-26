@@ -1,12 +1,12 @@
 _base_ = [
-    '../motifs/panoptic_fpn_r50_fpn_1x_predcls_psg.py',
+    '../motifs/segment_mask2former_r50_sgdet_psg.py',
 ]
 
-expt_name = 'transformer_panoptic_fpn_r50_bs_8x2_det_sample'
+expt_name = 'transformer_segment_panoptic_0.4_mask2former_r50_bs_8x2_det_sample'
 
 model = dict(
     relation_head=dict(
-        type='TransformerHead',
+        type='Mask2FormerTransformerHead',
         head_config=dict(
             # NOTE: Evaluation type
             use_gt_box=False,
@@ -20,7 +20,11 @@ model = dict(
             inner_dim=1024,
         ),
     ),
-    roi_head=dict(bbox_head=dict(type='SceneGraphBBoxHead'), ),
+    test_cfg=dict(
+        object_mask_thr=0.4,
+        max_per_image=30,
+        postprocess='panoptic',
+    )
 )
 
 evaluation = dict(interval=1,
