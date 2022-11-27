@@ -25,7 +25,6 @@ model = dict(
             use_bias=False,
             remove_bias=False,
         ),
-        expt_name=expt_name,
     ),
     roi_head=dict(bbox_head=dict(type='SceneGraphBBoxHead'), ),
 )
@@ -41,7 +40,7 @@ evaluation = dict(interval=1,
 data = dict(samples_per_gpu=8,
             workers_per_gpu=2
             )
-optimizer = dict(type='SGD', lr=0.001, momentum=0.9)
+optimizer = dict(type='SGD', lr=0.02, momentum=0.9)
 
 # Log config
 project_name = 'ICME-2023'
