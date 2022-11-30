@@ -120,11 +120,18 @@ def main():
     if args.launcher == 'none':
         distributed = False
     else:
+        # export NCCL_ASYNC_ERROR_HANDLING=1
+        # see https://pytorch.org/docs/stable/distributed.html#initialization
+        # and https://github.com/huggingface/accelerate/issues/314 for details
+        import datetime
+        cfg.dist_params.update(
+            {'timeout': datetime.timedelta(seconds=5400)})
         distributed = True
         init_dist(args.launcher, **cfg.dist_params)
         # re-set gpu_ids with distributed training mode
         _, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
+        del cfg.dist_params['timeout']
 
     # create work_dir
     mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
