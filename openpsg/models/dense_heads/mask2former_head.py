@@ -401,6 +401,7 @@ class PSGMask2FormerHead(PSGMaskFormerHead):
         cls_pred_list.append(cls_pred)
         mask_pred_list.append(mask_pred)
 
+        query_feat_list = []
         for i in range(self.num_transformer_decoder_layers):
             level_idx = i % self.num_transformer_feat_level
             # if a mask is all True(all background), then set it all False.
@@ -426,8 +427,9 @@ class PSGMask2FormerHead(PSGMaskFormerHead):
 
             cls_pred_list.append(cls_pred)
             mask_pred_list.append(mask_pred)
+            query_feat_list.append(query_feat)
 
         if return_query_feats:
-            return cls_pred_list, mask_pred_list, query_feat
+            return cls_pred_list, mask_pred_list, query_feat_list
         else:
             return cls_pred_list, mask_pred_list, None

@@ -2,6 +2,8 @@
 import torch
 import torch.nn.functional as F
 
+import numpy as np
+
 from mmdet.core.evaluation.panoptic_utils import INSTANCE_OFFSET
 from mmdet.core.mask import mask2bbox
 from mmdet.models.builder import HEADS
@@ -89,7 +91,8 @@ class SegmentPSGMaskFormerFusionHead(BasePanopticFusionHead):
 
         return panoptic_seg# }}}
 
-    def panopticlike_postprocess(self, mask_cls, mask_pred, query_feat):# {{{
+    def panopticlike_postprocess(self, mask_cls, mask_pred, query_feat,
+                                 sample_filter):# {{{
         """Panoptic-like segmengation inference.
         Args:
             mask_cls (Tensor): Classfication outputs of shape
@@ -107,7 +110,7 @@ class SegmentPSGMaskFormerFusionHead(BasePanopticFusionHead):
 
         mask_cls = F.softmax(mask_cls, dim=-1)
         scores, labels = mask_cls.max(-1)
-        keep = labels.ne(self.num_classes) & (scores > object_mask_thr)
+        keep = labels.ne(self.num_classes) & (scores > object_mask_thr) & sample_filter
 
         cur_scores = mask_cls[keep]
         # Move background to 0
@@ -232,6 +235,13 @@ class SegmentPSGMaskFormerFusionHead(BasePanopticFusionHead):
 
         return bboxes, labels_per_image, mask_pred_binary, query_feat# }}}
 
+    def generate_sample_filter(self, cur_cls_result, cur_mask_result,
+                               pre_cls_result, pre_mask_result, mask_thr=0.7):
+        sample_cls_filter = cur_cls_result.argmax(-1) != pre_cls_result.argmax(-1)
+        sample_mask_filter = cur_cls_result.argmax(-1) == pre_cls_result.argmax(-1) & \
+            (mask_overlaps(cur_mask_result, pre_mask_result) < mask_thr)
+        return sample_cls_filter | sample_mask_filter
+
     def simple_test(self,
                     mask_cls_results,
                     mask_pred_results,
@@ -278,51 +288,97 @@ class SegmentPSGMaskFormerFusionHead(BasePanopticFusionHead):
             'results are not supported yet.'
         assert query_feats is not None, 'query_feats should be given.'
 
-        results = []
-        for mask_cls_result, mask_pred_result, meta, query_feat in zip(
-                mask_cls_results, mask_pred_results, img_metas, query_feats):
-            # remove padding
-            img_height, img_width = meta['img_shape'][:2]
-            mask_pred_result = mask_pred_result[:, :img_height, :img_width]
+        num_layers = len(query_feats)
+        batch_size = query_feats[0].shape[0]
+        num_queries = query_feats[0].shape[1]
 
-            if rescale:
-                # return result in original resolution
-                ori_height, ori_width = meta['ori_shape'][:2]
-                mask_pred_result = F.interpolate(
-                    mask_pred_result[:, None],
-                    size=(ori_height, ori_width),
-                    mode='bilinear',
-                    align_corners=False)[:, 0]
+        results = []
+        for b in range(batch_size):
+            meta = img_metas[b]
 
             result = dict()
-            if panoptic_on:
-                pan_results = self.panoptic_postprocess(
-                    mask_cls_result, mask_pred_result)
-                if postprocess == 'instance':
-                    bboxes, labels, masks, query_feat = self.instancelike_postprocess(
-                        mask_cls_result, mask_pred_result, query_feat)
-                elif postprocess == 'panoptic':
-                    bboxes, labels, masks, query_feat, dists = self.panopticlike_postprocess(
-                        mask_cls_result, mask_pred_result, query_feat)
-                    result['dists'] = dists
+            dists_list = []
+            masks_list = []
+            bboxes_list = []
+            labels_list = []
+            query_feats_list = []
+            pan_results = None
+            for l in range(num_layers):
+                mask_cls_result = mask_cls_results[l][b]
+                mask_pred_result = mask_pred_results[l][b]
+                query_feat = query_feats[l][b]
+
+                # remove padding
+                img_height, img_width = meta['img_shape'][:2]
+                mask_pred_result = mask_pred_result[:, :img_height, :img_width]
+
+                if l == num_layers - 1:
+                    sample_filter = mask_pred_result.new_ones(
+                        (num_queries, )).bool()
                 else:
-                    raise ValueError
-                result['masks'] = masks
-                result['bboxes'] = bboxes
-                result['labels'] = labels
-                result['query_feats'] = query_feat
-                result['pan_results'] = pan_results
+                    pre_mask_cls_result = mask_cls_results[l+1][b]
+                    pre_mask_pred_result = mask_pred_results[l+1][b][:, :img_height, :img_width]
+                    sample_filter = self.generate_sample_filter(mask_cls_result,
+                                                                mask_pred_result,
+                                                                pre_mask_cls_result,
+                                                                pre_mask_pred_result,
+                                                                mask_thr=0.7)
 
-            if instance_on:
-                ins_results = self.instance_postprocess(
-                    mask_cls_result, mask_pred_result)
-                result['ins_results'] = ins_results
+                if rescale:
+                    # return result in original resolution
+                    ori_height, ori_width = meta['ori_shape'][:2]
+                    mask_pred_result = F.interpolate(
+                        mask_pred_result[:, None],
+                        size=(ori_height, ori_width),
+                        mode='bilinear',
+                        align_corners=False)[:, 0]
+        
+                if panoptic_on:
+                    if l == num_layers - 1:
+                        pan_results = self.panoptic_postprocess(
+                            mask_cls_result, mask_pred_result)
+                    bboxes, labels, masks, query_feat, dists = self.panopticlike_postprocess(
+                        mask_cls_result, mask_pred_result,
+                        query_feat, sample_filter)
 
-            if semantic_on:
-                sem_results = self.semantic_postprocess(
-                    mask_cls_result, mask_pred_result)
-                result['sem_results'] = sem_results
+                    dists_list.append(dists)
+                    masks_list.append(masks)
+                    bboxes_list.append(bboxes)
+                    labels_list.append(labels)
+                    query_feats_list.append(query_feat)
 
+            result['pan_results'] = pan_results
+            result['dists'] = torch.cat(dists_list)
+            result['masks'] = torch.cat(masks_list)
+            result['bboxes'] = torch.cat(bboxes_list)
+            result['labels'] = torch.cat(labels_list)
+            result['query_feats'] = torch.cat(query_feats_list)
             results.append(result)
 
         return results
+
+def mask_overlaps(masks1, masks2):
+    """Computes IoU overlaps between two sets of masks."""
+    masks1 = masks1.permute((1, 2, 0))
+    masks2 = masks2.permute((1, 2, 0))
+
+    masks1 = masks1 > 0
+    masks2 = masks2 > 0
+
+    assert masks1.shape[0] == masks2.shape[0] and \
+            masks1.shape[1] == masks2.shape[1] and \
+             masks1.shape[2] == masks2.shape[2]
+
+    # flatten masks and compute their areas
+    num_queries = masks1.shape[-1]
+    masks1 = torch.reshape(masks1 > 0.5, (-1, num_queries)).float()
+    masks2 = torch.reshape(masks2 > 0.5, (-1, num_queries)).float()
+    area1 = masks1.sum(0)
+    area2 = masks2.sum(0)
+
+    # intersections and union
+    intersections = torch.mul(masks1, masks2).sum(0)
+    union = area1 + area2 - intersections
+    overlaps = intersections / (union + 1e-5)
+
+    return overlaps
