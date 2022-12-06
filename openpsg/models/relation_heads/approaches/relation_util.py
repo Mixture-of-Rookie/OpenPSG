@@ -159,10 +159,10 @@ class PostProcessor(nn.Module):
                                         dim=0,
                                         descending=True)
             triple_scores = triple_scores.view(-1)[sorting_idx].contiguous()
-            rel_pair_idx = rel_pair_idx[sorting_idx]
-            rel_class_prob = rel_class_prob[sorting_idx]
-            rel_labels = rel_class[sorting_idx]
-            rel_logit = rel_logit[sorting_idx]
+            rel_pair_idx = rel_pair_idx[sorting_idx][:100]
+            rel_class_prob = rel_class_prob[sorting_idx][:100]
+            rel_labels = rel_class[sorting_idx][:100]
+            rel_logit = rel_logit[sorting_idx][:100]
             if key_first and ranking_scores is not None:
                 prop_ranking_scores.append(ranking_scores[i][sorting_idx])
 
