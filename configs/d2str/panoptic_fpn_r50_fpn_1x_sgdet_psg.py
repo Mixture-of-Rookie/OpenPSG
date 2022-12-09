@@ -43,12 +43,12 @@ log_config = dict(
     interval=50,
     hooks=[
         dict(type='TextLoggerHook'),
-        #dict(
-        #    type='WandbLoggerHook',
-        #    init_kwargs=dict(
-        #        project=project_name,
-        #        name=expt_name,
-        #    ),
-        #),
+        dict(
+            type='WandbLoggerHook',
+            init_kwargs=dict(
+                project=project_name,
+                name=expt_name,
+            ),
+        ),
     ],
 )
