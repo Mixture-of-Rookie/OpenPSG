@@ -303,7 +303,7 @@ class SegmentPSGMaskFormerFusionHead(BasePanopticFusionHead):
             labels_list = []
             query_feats_list = []
             pan_results = None
-            for l in range(num_layers):
+            for l in range(num_layers)[::-1]:
                 mask_cls_result = mask_cls_results[l][b]
                 mask_pred_result = mask_pred_results[l][b]
                 query_feat = query_feats[l][b]
