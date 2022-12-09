@@ -4,3 +4,4 @@ from .motif_head import MotifHead
 from .vctree_head import VCTreeHead
 from .rtpb_head import RTPBHead
 from .transformer_head import TransformerHead
+from .d2str_head import D2STRHead

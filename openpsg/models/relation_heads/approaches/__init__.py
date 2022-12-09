@@ -8,3 +8,4 @@ from .sampling import RelationSampler
 from .vctree import VCTreeLSTMContext
 from .rtpb import GTransformerContext, BaseTransformerEncoder
 from .transformer import TransformerContext
+from .d2str import TransformerEncoder
