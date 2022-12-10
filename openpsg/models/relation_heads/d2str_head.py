@@ -69,7 +69,8 @@ class D2STRHead(RelationHead):
             self.label_embed2.weight.copy_(glove_vec, non_blocking=True)
 
 
-    def forward(self, img, img_meta, det_result, gt_result=None, is_testing=False):
+    def forward(self, img, img_meta, det_result, gt_result=None,
+                is_testing=False, ignore_classes=None):
         # 0. extract feats & sample object-pairs
         roi_feats, union_feats, det_result = self.frontend_features(
             img, img_meta, det_result, gt_result)
