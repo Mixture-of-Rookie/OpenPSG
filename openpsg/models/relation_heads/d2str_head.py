@@ -57,7 +57,17 @@ class D2STRHead(RelationHead):
 
         # relation decoder
         self.rel_decoder = nn.Linear(self.rel_dim, self.num_predicates)
+        self.use_vision = self.head_config.use_vision
+        self.context_pooling_dim = self.head_config.context_pooling_dim
+        self.rel2cxt = nn.Linear(self.rel_dim, self.context_pooling_dim)
+        self.vis_decoder = nn.Linear(self.context_pooling_dim, self.num_predicates)
 
+        if self.context_pooling_dim != self.head_config.roi_dim:
+            self.union_single_not_match = True
+            self.up_dim = nn.Linear(self.head_config.roi_dim,
+                                    self.context_pooling_dim)
+        else:
+            self.union_single_not_match = False
 
     def init_weights(self):
         # initialize embedding with glove vector
@@ -98,6 +108,14 @@ class D2STRHead(RelationHead):
 
         # 6. forward relation decoder
         rel_dists = self.rel_decoder(rel_feats)
+
+        if self.use_vision:
+            ctx_gate = self.rel2cxt(rel_feats)
+            if self.union_single_not_match:
+                vis_feats = ctx_gate * self.up_dim(union_feats)
+            else:
+                vis_feats = ctx_gate * union_feats
+            rel_dists = rel_dists + self.vis_decoder(vis_feats)
 
         # 7. result results
         if self.training:
