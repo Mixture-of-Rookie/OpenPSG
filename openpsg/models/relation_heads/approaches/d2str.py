@@ -70,10 +70,12 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerEncoder(nn.Module):
-    def __init__(self, n_layer, n_dim, n_head, mlp_ratio=4.):
+    def __init__(self, n_layer, n_dim, n_head, mlp_ratio=4.,
+                 drop=0., attn_drop=0., drop_path=0.):
         super().__init__()
         self.blocks = nn.ModuleList([
-            TransformerBlock(n_dim, n_head, mlp_ratio)
+            TransformerBlock(n_dim, n_head, mlp_ratio,
+                             drop, attn_drop, drop_path)
             for _ in range(n_layer)
         ])
 

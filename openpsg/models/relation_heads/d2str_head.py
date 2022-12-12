@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 
 from mmdet.models import HEADS
+from mmcv.cnn import normal_init, xavier_init
 
 from .relation_head import RelationHead
 from .approaches import TransformerEncoder
@@ -34,7 +35,10 @@ class D2STRHead(RelationHead):
         self.obj_encoder = TransformerEncoder(
             n_layer=self.head_config.obj_layer,
             n_dim=self.head_config.obj_dim,
-            n_head=self.head_config.num_head
+            n_head=self.head_config.num_head,
+            drop=self.head_config.drop,
+            attn_drop=self.head_config.attn_drop,
+            drop_path=self.head_config.drop_path,
         )
 
         # object decoder
@@ -53,6 +57,9 @@ class D2STRHead(RelationHead):
             n_dim=self.head_config.rel_dim,
             n_head=self.head_config.num_head,
             mlp_ratio=self.head_config.rel_mlp_ratio,
+            drop=self.head_config.drop,
+            attn_drop=self.head_config.attn_drop,
+            drop_path=self.head_config.drop_path,
         )
 
         # relation decoder
@@ -78,6 +85,20 @@ class D2STRHead(RelationHead):
             self.label_embed1.weight.copy_(glove_vec, non_blocking=True)
             self.label_embed2.weight.copy_(glove_vec, non_blocking=True)
 
+        normal_init(self.lin_rel,
+                    mean=0,
+                    std=10.0 * (1.0 / self.hidden_dim) ** 0.5)
+
+        xavier_init(self.obj_decoder)
+        xavier_init(self.rel_decoder)
+        xavier_init(self.vis_decoder)
+        xavier_init(self.rel2cxt)
+
+        if self.union_single_not_match:
+            xavier_init(self.up_dim)
+
+        self.bbox_roi_extractor.init_weights()
+        self.relation_roi_extractor.init_weights()
 
     def forward(self, img, img_meta, det_result, gt_result=None,
                 is_testing=False, ignore_classes=None):
