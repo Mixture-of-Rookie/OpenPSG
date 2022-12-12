@@ -18,6 +18,30 @@ import torch
 from six.moves.urllib.request import urlretrieve
 from tqdm import tqdm
 
+psg_objs = [
+    '__background__', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train',
+    'truck', 'boat', 'light', 'hydrant', 'sign',
+    'parking', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
+    'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag',
+    'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'ball', 'kite',
+    'bat', 'glove', 'skateboard', 'surfboard',
+    'racket', 'bottle', 'glass', 'cup', 'fork', 'knife', 'spoon',
+    'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot',
+    'hotdog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'bonsai',
+    'bed', 'table', 'toilet', 'tv', 'laptop', 'mouse', 'remote',
+    'keyboard', 'phone', 'microwave', 'oven', 'toaster', 'sink',
+    'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddybears',
+    'drier', 'toothbrush', 'banner', 'blanket', 'bridge', 'cardboard',
+    'counter', 'curtain', 'door', 'wood', 'flower', 'fruit',
+    'gravel', 'house', 'light', 'mirror', 'net', 'pillow', 'platform',
+    'playground', 'railroad', 'river', 'road', 'roof', 'sand', 'sea',
+    'shelf', 'snow', 'stairs', 'tent', 'towel', 'brick', 'stone',
+    'tile', 'wall', 'water', 'windowblinds', 'window',
+    'tree', 'fence', 'ceiling', 'sky',
+    'cabinet', 'table', 'floor', 'pavement',
+    'mountain', 'grass', 'dirt', 'paper',
+    'food', 'building', 'rock', 'wall', 'rug'
+]
 
 def normalize_sigmoid_logits(orig_logits):
     orig_logits = torch.sigmoid(orig_logits)
@@ -166,6 +190,30 @@ def obj_edge_vectors(names, wv_dir, wv_type='glove.6B', wv_dim=300):
     vectors.normal_(0, 1)
 
     for i, token in enumerate(names):
+        wv_index = wv_dict.get(token, None)
+        if wv_index is not None:
+            vectors[i] = wv_arr[wv_index]
+        else:
+            # Try the longest word
+            lw_token = sorted(token.split(' '),
+                              key=lambda x: len(x),
+                              reverse=True)[0]
+            print('{} -> {} '.format(token, lw_token))
+            wv_index = wv_dict.get(lw_token, None)
+            if wv_index is not None:
+                vectors[i] = wv_arr[wv_index]
+            else:
+                print('fail on {}'.format(token))
+
+    return vectors
+
+def psg_obj_edge_vectors(wv_dir, wv_type='glove.6B', wv_dim=300):
+    wv_dict, wv_arr, wv_size = load_word_vectors(wv_dir, wv_type, wv_dim)
+
+    vectors = torch.Tensor(len(psg_objs), wv_dim)
+    vectors.normal_(0, 1)
+
+    for i, token in enumerate(psg_objs):
         wv_index = wv_dict.get(token, None)
         if wv_index is not None:
             vectors[i] = wv_arr[wv_index]

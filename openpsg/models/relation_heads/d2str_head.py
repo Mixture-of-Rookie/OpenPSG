@@ -11,7 +11,7 @@ from .relation_head import RelationHead
 from .approaches import TransformerEncoder
 from .approaches.motif_util import (
     encode_box_info,
-    obj_edge_vectors,
+    psg_obj_edge_vectors,
 )
 
 @HEADS.register_module()
@@ -78,9 +78,8 @@ class D2STRHead(RelationHead):
 
     def init_weights(self):
         # initialize embedding with glove vector
-        glove_vec = obj_edge_vectors(self.obj_classes,
-                                     wv_dir=self.head_config.glove_dir,
-                                     wv_dim=self.embed_dim)
+        glove_vec = psg_obj_edge_vectors(wv_dir=self.head_config.glove_dir,
+                                         wv_dim=self.embed_dim)
         with torch.no_grad():
             self.label_embed1.weight.copy_(glove_vec, non_blocking=True)
             self.label_embed2.weight.copy_(glove_vec, non_blocking=True)
@@ -96,9 +95,6 @@ class D2STRHead(RelationHead):
 
         if self.union_single_not_match:
             xavier_init(self.up_dim)
-
-        self.bbox_roi_extractor.init_weights()
-        self.relation_roi_extractor.init_weights()
 
     def forward(self, img, img_meta, det_result, gt_result=None,
                 is_testing=False, ignore_classes=None):
