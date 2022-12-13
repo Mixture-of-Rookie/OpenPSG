@@ -75,6 +75,7 @@ class Result(object):
         head_spec_losses=None,  # For method-specific loss
         pan_results=None,
         query_feats=None,
+        attn_list=None,
     ):
         self.__dict__.update(locals())
         del self.__dict__['self']

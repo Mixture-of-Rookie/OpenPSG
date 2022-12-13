@@ -35,6 +35,7 @@ class RelationHead(BaseModule):
                          use_sigmoid=False,
                          loss_weight=1.0),
         loss_relation=None,
+        loss_attention=None,
         init_cfg=None,
     ):
         """The public parameters that shared by various relation heads are
@@ -105,6 +106,9 @@ class RelationHead(BaseModule):
         if loss_relation is not None:
             self.loss_relation = builder.build_loss(loss_relation)
 
+        if loss_attention is not None:
+            self.loss_attention = builder.build_loss(loss_attention)
+
         if use_statistics:
             cache_dir = dataset_config['cache']
             self.statistics = torch.load(cache_dir,
@@ -152,6 +156,11 @@ class RelationHead(BaseModule):
     def with_loss_relation(self):
         return hasattr(self,
                        'loss_relation') and self.loss_relation is not None
+
+    @property
+    def with_loss_attention(self):
+        return hasattr(self,
+                       'loss_attention') and self.loss_attention is not None
 
     @property
     def with_relation_ranker(self):
@@ -277,6 +286,8 @@ class RelationHead(BaseModule):
 
     def loss(self, det_result):
         (
+            relmaps,
+            attn_list,
             obj_scores,
             rel_scores,
             target_labels,
@@ -284,6 +295,8 @@ class RelationHead(BaseModule):
             add_for_losses,
             head_spec_losses,
         ) = (
+            det_result.relmaps,
+            det_result.attn_list,
             det_result.refine_scores,
             det_result.rel_scores,
             det_result.target_labels,
@@ -318,6 +331,26 @@ class RelationHead(BaseModule):
             losses['loss_relation'] = self.loss_relation(
                 rel_scores, target_rel_labels)
             losses['acc_relation'] = accuracy(rel_scores, target_rel_labels)
+
+        if self.with_loss_attention and attn_list is not None:
+            attn_weights = attn_list[-1]
+            attn_loss = 0.
+            for i, (attn_weight, relmap) in enumerate(
+                    zip(attn_weights, relmaps)):
+                num_objs = relmap.shape[0]
+                attn_weight = attn_weight[:num_objs, :num_objs]
+
+                # if one object has no relation with other objects
+                # we set its diagonal as 1
+                num_rels = relmap.sum(1)
+                diag = torch.where(num_rels >= 1, 0, 1)
+                diag = torch.diag(diag)
+                relmap = relmap + diag
+
+                attn_prior = attn_weight.new_full(attn_weight.shape, 1. / num_objs)
+                target = torch.where(relmap == 0, -1, 1)
+                attn_loss += self.loss_attention(attn_weight, attn_prior, target)
+            losses['loss_attention'] = attn_loss
 
         if self.with_relation_ranker:
             target_key_rel_labels = det_result.target_key_rel_labels

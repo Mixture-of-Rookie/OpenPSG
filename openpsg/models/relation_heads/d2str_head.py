@@ -4,6 +4,7 @@
 import torch
 import torch.nn as nn
 
+from mmdet.core import bbox2roi
 from mmdet.models import HEADS
 from mmcv.cnn import normal_init, xavier_init
 
@@ -111,6 +112,19 @@ class D2STRHead(RelationHead):
         num_objs = [len(b) for b in det_result.bboxes]
         obj_feats, attn_list = self.obj_encoder(obj_inputs, num_objs)
 
+        if is_testing:
+            # from dense to sparse
+            rel_pair_idxes = self.relation_sampler.prepare_test_pairs(
+                det_result, attn_weights=attn_list[-1], threshold=0.0,
+            )
+            det_result.rel_pair_idxes = rel_pair_idxes
+
+            rois = bbox2roi(det_result.bboxes)
+            union_feats = self.relation_roi_extractor(img,
+                                                      img_meta,
+                                                      rois,
+                                                      rel_pair_idx=rel_pair_idxes)[0]
+
         # 3. forward object decoder
         obj_dists = self.obj_decoder(obj_feats)
         obj_preds = obj_dists[:, 1:].max(1)[1] + 1
@@ -146,6 +160,7 @@ class D2STRHead(RelationHead):
             obj_dists = obj_dists.split(num_objs, dim=0)
             rel_dists = rel_dists.split(num_rels, dim=0)
 
+        det_result.attn_list = attn_list
         det_result.refine_scores = obj_dists
         det_result.rel_scores = rel_dists
         return det_result

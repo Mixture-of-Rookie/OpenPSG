@@ -44,11 +44,11 @@ class RelationSampler(object):
         self.num_hit = 0.
         self.num_total = 0.
 
-    def prepare_test_pairs(self, det_result):
+    def prepare_test_pairs(self, det_result, attn_weights=None, threshold=None):
         # prepare object pairs for relation prediction
         rel_pair_idxes = []
         device = det_result.bboxes[0].device
-        for p in det_result.bboxes:
+        for i, p in enumerate(det_result.bboxes):
             n = len(p)
             cand_matrix = torch.ones(
                 (n, n), device=device) - torch.eye(n, device=device)
@@ -57,6 +57,12 @@ class RelationSampler(object):
             if self.test_overlap:
                 cand_matrix = cand_matrix.byte() & bbox_overlaps(
                     p[:, :4], p[:, :4]).gt(0).byte()
+
+            # from dense to sparse
+            if attn_weights is not None:
+                attn_weight = attn_weights[i]
+                cand_matrix = cand_matrix.byte() & (attn_weight >= threshold)
+                
             idxs = torch.nonzero(cand_matrix).view(-1, 2)
             if len(idxs) > 0:
                 rel_pair_idxes.append(idxs)

@@ -21,6 +21,7 @@ model = dict(
             drop_path=0.1,
             rel_mlp_ratio=1.,
         ),
+        loss_attention=dict(type='AttnMarginLoss'),
     ),
     roi_head=dict(bbox_head=dict(type='SceneGraphBBoxHead'), ),
 )
