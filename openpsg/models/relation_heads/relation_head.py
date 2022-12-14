@@ -349,7 +349,8 @@ class RelationHead(BaseModule):
 
                 attn_prior = attn_weight.new_full(attn_weight.shape, 1. / num_objs)
                 target = torch.where(relmap == 0, -1, 1)
-                attn_loss += self.loss_attention(attn_weight, attn_prior, target)
+                attn_loss += self.loss_attention(attn_weight, attn_prior,
+                                                 target, margin= 1. / num_objs)
             losses['loss_attention'] = attn_loss
 
         if self.with_relation_ranker:
