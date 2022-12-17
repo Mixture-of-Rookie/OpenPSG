@@ -6,7 +6,7 @@ expt_name = 'd2str_segment_panoptic_0.8_mask2former_r50_bs_8x2_det_sample'
 
 model = dict(
     relation_head=dict(
-        type='D2STRHead',
+        type='Mask2FormerD2STRHead',
         head_config=dict(
             # NOTE: Evaluation type
             use_gt_box=False,

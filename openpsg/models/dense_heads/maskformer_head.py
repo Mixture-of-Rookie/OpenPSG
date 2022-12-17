@@ -540,24 +540,40 @@ class PSGMaskFormerHead(AnchorFreeHead):
             - mask_pred_results (Tensor): Mask logits, shape \
                 (batch_size, num_queries, h, w).
         """
+        # len(all_cls_scores) = 10
+        # len(all_mask_preds) = 10
+        # len(all_query_feats) = 9
         all_cls_scores, all_mask_preds, all_query_feats = self(feats, img_metas, return_query_feats)
         for i in range(len(all_query_feats)):
             all_query_feats[i] = all_query_feats[i].transpose(0, 1)
 
-        mask_cls_results = all_cls_scores[1:][2::3]
-        mask_pred_results = all_mask_preds[1:][2::3]
-        query_feat_results = all_query_feats[2::3]
+        use_last_layer = True
+        if use_last_layer:
+            mask_cls_results = all_cls_scores[-1]
+            mask_pred_results = all_mask_preds[-1]
+            query_feat_results = all_query_feats[-1]
 
-        # upsample masks
-        img_shape = img_metas[0]['batch_input_shape']
-        up_mask_pred_results = []
-        for mask_pred in mask_pred_results:
-            tmp_mask_pred_results = F.interpolate(
-                    mask_pred,
-                    size=(img_shape[0], img_shape[1]),
-                    mode='bilinear',
-                    align_corners=False)
-            up_mask_pred_results.append(tmp_mask_pred_results)
+            img_shape = img_metas[0]['batch_input_shape']
+            up_mask_pred_results = F.interpolate(
+                mask_pred_results,
+                size=(img_shape[0], img_shape[1]),
+                mode='bilinear',
+                align_corners=False)
+        else:
+            mask_cls_results = all_cls_scores[1:][2::3]
+            mask_pred_results = all_mask_preds[1:][2::3]
+            query_feat_results = all_query_feats[2::3]
+
+            # upsample masks
+            img_shape = img_metas[0]['batch_input_shape']
+            up_mask_pred_results = []
+            for mask_pred in mask_pred_results:
+                tmp_mask_pred_results = F.interpolate(
+                        mask_pred,
+                        size=(img_shape[0], img_shape[1]),
+                        mode='bilinear',
+                        align_corners=False)
+                up_mask_pred_results.append(tmp_mask_pred_results)
 
         if return_query_feats:
             return mask_cls_results, up_mask_pred_results, query_feat_results
