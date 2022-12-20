@@ -11,6 +11,8 @@ model = dict(
             # NOTE: Evaluation type
             use_gt_box=False,
             use_gt_label=False,
+            use_spatial=True,
+            spatial_size=16,
             obj_layer=4,
             rel_layer=2,
             obj_dim=512,

@@ -1,6 +1,8 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import numpy as np
+
 import torch
 import torch.nn as nn
 
@@ -279,6 +281,13 @@ class Mask2FormerD2STRHead(RelationHead):
         else:
             self.union_single_not_match = False
 
+        self.use_spatial = self.head_config.use_spatial
+        self.spatial_size = self.head_config.spatial_size
+        if self.use_spatial:
+            self.spatial_lin = nn.Linear(2 * self.spatial_size *
+                                             self.spatial_size,
+                                         self.hidden_dim)
+
 
     def init_weights(self):
         # initialize embedding with glove vector
@@ -303,7 +312,8 @@ class Mask2FormerD2STRHead(RelationHead):
             xavier_init(self.up_dim)
 
 
-    def frontend_features(self, img_meta, det_result, gt_result, assigner='mask'):
+    def frontend_features(self, img_meta, det_result, gt_result, assigner='bbox'):
+        bboxes = det_result.bboxes
         query_feats = det_result.query_feats
 
         if gt_result is not None and gt_result.rels is not None:
@@ -331,7 +341,11 @@ class Mask2FormerD2STRHead(RelationHead):
         det_result.target_key_rel_labels = key_rel_labels
 
         roi_feats = self.get_bbox_feat(query_feats)
-        union_feats = self.get_relation_feat(query_feats, rel_pair_idxes)
+        union_feats = self.get_relation_feat(query_feats, rel_pair_idxes,
+                                             use_spatial=self.use_spatial,
+                                             bboxes=bboxes,
+                                             img_meta=img_meta,
+                                             spatial_size=self.spatial_size)
 
         return roi_feats + union_feats + (det_result, )
 
@@ -341,12 +355,59 @@ class Mask2FormerD2STRHead(RelationHead):
         return (self.bbox_head(all_query_feats), )
 
 
-    def get_relation_feat(self, query_feats, rel_pair_idxes):
+    def get_relation_feat(self, query_feats, rel_pair_idxes, use_spatial=False,
+                          bboxes=None, img_meta=None, spatial_size=None):
         union_feats = []
-        for query_feat, rel_pair_idx in zip(query_feats, rel_pair_idxes):
+        for i, (query_feat, rel_pair_idx) in enumerate(zip(query_feats,
+                                                           rel_pair_idxes)):
             head_feat = query_feat[rel_pair_idx[:, 0]]
             tail_feat = query_feat[rel_pair_idx[:, 1]]
             union_feat = torch.cat([head_feat, tail_feat], dim=-1)
+            if use_spatial:
+                bbox = bboxes[i]
+                num_rel = len(rel_pair_idx)
+                dummy_x_range = (torch.arange(spatial_size).to(
+                    rel_pair_idx.device).view(1, 1,
+                                                -1).expand(num_rel, spatial_size,
+                                                           spatial_size))
+                dummy_y_range = (torch.arange(spatial_size).to(
+                    rel_pair_idx.device).view(1, -1,
+                                                1).expand(num_rel, spatial_size,
+                                                          spatial_size))
+                img_shape = torch.tensor(img_meta[i]['img_shape'][:2]).tile(num_rel, 1)
+                img_shape = img_shape.to(bbox)
+
+                # resize bbox to the spatial_size
+                head_bbox = bbox[rel_pair_idx[:, 0]][:, :4]
+                head_bbox[:, 0::2] *= spatial_size / img_shape[:, 1:2]
+                head_bbox[:, 1::2] *= spatial_size / img_shape[:, 0:1]
+                tail_bbox = bbox[rel_pair_idx[:, 1]][:, :4]
+                tail_bbox[:, 0::2] *= spatial_size / img_shape[:, 1:2]
+                tail_bbox[:, 1::2] *= spatial_size / img_shape[:, 0:1]
+
+                head_rect = ((dummy_x_range >= head_bbox[:, 0].floor().view(
+                    -1, 1, 1).long())
+                             & (dummy_x_range <= head_bbox[:, 2].ceil().view(
+                                 -1, 1, 1).long())
+                             & (dummy_y_range >= head_bbox[:, 1].floor().view(
+                                 -1, 1, 1).long())
+                             & (dummy_y_range <= head_bbox[:, 3].ceil().view(
+                                 -1, 1, 1).long())).float()
+                tail_rect = ((dummy_x_range >= tail_bbox[:, 0].floor().view(
+                    -1, 1, 1).long())
+                             & (dummy_x_range <= tail_bbox[:, 2].ceil().view(
+                                 -1, 1, 1).long())
+                             & (dummy_y_range >= tail_bbox[:, 1].floor().view(
+                                 -1, 1, 1).long())
+                             & (dummy_y_range <= tail_bbox[:, 3].ceil().view(
+                                 -1, 1, 1).long())).float()
+
+                rect_input = torch.stack((head_rect, tail_rect),
+                                         dim=1)  # (num_rel, 2, rect_size, rect_size)
+                rect_feat = self.spatial_lin(rect_input.view(rect_input.size(0),
+                                                             -1))
+                union_feat = union_feat + rect_feat
+
             union_feat = self.union_head(union_feat)
             union_feats.append(union_feat)
         return (torch.cat(union_feats, dim=0), )
