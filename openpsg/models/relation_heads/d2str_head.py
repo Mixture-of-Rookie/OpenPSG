@@ -312,7 +312,7 @@ class Mask2FormerD2STRHead(RelationHead):
             xavier_init(self.up_dim)
 
 
-    def frontend_features(self, img_meta, det_result, gt_result, assigner='bbox'):
+    def frontend_features(self, img_meta, det_result, gt_result, assigner='mask'):
         bboxes = det_result.bboxes
         query_feats = det_result.query_feats
 
