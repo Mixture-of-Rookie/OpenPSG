@@ -29,7 +29,8 @@ class RelationSampler(object):
                  pos_fraction,
                  use_gt_box,
                  test_overlap=False,
-                 key_sample=False):
+                 key_sample=False,
+                 attn_threshold=None):
         self.type = type
         self.pos_iou_thr = pos_iou_thr
         self.require_overlap = require_overlap
@@ -39,12 +40,13 @@ class RelationSampler(object):
         self.use_gt_box = use_gt_box
         self.test_overlap = test_overlap
         self.key_sample = key_sample
+        self.attn_threshold = attn_threshold
 
         # for diagnose how many rels are used for training
         self.num_hit = 0.
         self.num_total = 0.
 
-    def prepare_test_pairs(self, det_result, attn_weights=None, threshold=None):
+    def prepare_test_pairs(self, det_result, attn_weights=None, obj_dists=None):
         # prepare object pairs for relation prediction
         rel_pair_idxes = []
         device = det_result.bboxes[0].device
@@ -61,7 +63,7 @@ class RelationSampler(object):
             # from dense to sparse
             if attn_weights is not None:
                 attn_weight = attn_weights[i]
-                cand_matrix = cand_matrix.byte() & (attn_weight >= threshold)
+                cand_matrix = cand_matrix.byte() & (attn_weight >= self.attn_threshold)
                 
             idxs = torch.nonzero(cand_matrix).view(-1, 2)
             if len(idxs) > 0:
@@ -227,7 +229,7 @@ class RelationSampler(object):
             return rel_labels, rel_idx_pairs, rel_sym_binarys
 
 
-    def segm_relsample(self, det_result, gt_result):
+    def segm_relsample(self, det_result, gt_result, attn_weights=None):
         # corresponding to rel_assignments function in neural-motifs
         """
         The input proposals are already processed by subsample function of box_head,
@@ -253,10 +255,12 @@ class RelationSampler(object):
         key_rel_labels = []
         if gt_keyrels is None:
             gt_keyrels = [None] * len(gt_labels)
+        if attn_weights is None:
+            attn_weights = [None] * len(gt_labels)
         for img_id, (prp_mask, prp_lab, tgt_mask, tgt_lab, tgt_rel_matrix,
-                     tgt_rel, tgt_keyrel) in enumerate(
+                     tgt_rel, tgt_keyrel, attn_weight) in enumerate(
                          zip(masks, labels, gt_masks, gt_labels, gt_relmaps,
-                             gt_rels, gt_keyrels)):
+                             gt_rels, gt_keyrels, attn_weights)):
             # IoU matching
             ious = mask_overlaps(tgt_mask, prp_mask, device)
             is_match = (tgt_lab[:, None] == prp_lab[None]) & (
@@ -276,9 +280,15 @@ class RelationSampler(object):
             rel_possibility[prp_lab == 0] = 0
             rel_possibility[:, prp_lab == 0] = 0
 
-            img_rel_triplets, binary_rel = sampling_function(
-                device, tgt_rel_matrix, tgt_rel, tgt_keyrel, ious, is_match,
-                rel_possibility)
+            if attn_weight is not None:
+                img_rel_triplets, binary_rel = sampling_function(
+                    device, tgt_rel_matrix, tgt_rel, tgt_keyrel, ious, is_match,
+                    rel_possibility, attn_weight[:num_prp, :num_prp])
+            else:
+                img_rel_triplets, binary_rel = sampling_function(
+                    device, tgt_rel_matrix, tgt_rel, tgt_keyrel, ious, is_match,
+                    rel_possibility)
+
             rel_idx_pairs.append(
                 img_rel_triplets[:, :2])  # (num_rel, 2),  (sub_idx, obj_idx)
             rel_labels.append(img_rel_triplets[:, 2])  # (num_rel, )
@@ -293,7 +303,8 @@ class RelationSampler(object):
 
 
     def motif_rel_fg_bg_sampling(self, device, tgt_rel_matrix, tgt_rel,
-                                 tgt_keyrel, ious, is_match, rel_possibility):
+                                 tgt_keyrel, ious, is_match, rel_possibility,
+                                 attn_weight=None):
         """
         prepare to sample fg relation triplet and bg relation triplet
         tgt_rel_matrix: # [number_target, number_target]
@@ -366,6 +377,9 @@ class RelationSampler(object):
             prp_tail_idxs = prp_tail_idxs.view(1, -1).expand(
                 num_match_head, num_match_tail).contiguous().view(-1)
             valid_pair = prp_head_idxs != prp_tail_idxs
+            if attn_weight is not None:
+                attn_valid = attn_weight[prp_head_idxs, prp_tail_idxs] >= self.attn_threshold
+                valid_pair = attn_valid & valid_pair
             if valid_pair.sum().item() <= 0:
                 continue
             # remove self-pair
@@ -416,6 +430,10 @@ class RelationSampler(object):
                 perm = torch.randperm(fg_rel_triplets.shape[0],
                                       device=device)[:self.num_pos_per_img]
                 fg_rel_triplets = fg_rel_triplets[perm]
+
+        if attn_weight is not None:
+            rel_possibility = rel_possibility & (
+                attn_weight >= self.attn_threshold).byte()
 
         # select bg relations
         bg_rel_inds = torch.nonzero(rel_possibility > 0).view(-1, 2)

@@ -312,7 +312,8 @@ class Mask2FormerD2STRHead(RelationHead):
             xavier_init(self.up_dim)
 
 
-    def frontend_features(self, img_meta, det_result, gt_result, assigner='mask'):
+    def frontend_features(self, img_meta, det_result, gt_result,
+                          attn_weights=None, assigner='mask'):
         bboxes = det_result.bboxes
         query_feats = det_result.query_feats
 
@@ -323,7 +324,7 @@ class Mask2FormerD2STRHead(RelationHead):
             elif assigner == 'mask':
                 sample_function = self.relation_sampler.segm_relsample
 
-            sample_res = sample_function(det_result, gt_result)
+            sample_res = sample_function(det_result, gt_result, attn_weights)
 
             if len(sample_res) == 4:
                 rel_labels, rel_pair_idxes, rel_matrix, \
@@ -340,14 +341,13 @@ class Mask2FormerD2STRHead(RelationHead):
         det_result.target_rel_labels = rel_labels
         det_result.target_key_rel_labels = key_rel_labels
 
-        roi_feats = self.get_bbox_feat(query_feats)
         union_feats = self.get_relation_feat(query_feats, rel_pair_idxes,
                                              use_spatial=self.use_spatial,
                                              bboxes=bboxes,
                                              img_meta=img_meta,
                                              spatial_size=self.spatial_size)
 
-        return roi_feats + union_feats + (det_result, )
+        return union_feats + (det_result, )
 
 
     def get_bbox_feat(self, query_feats):
@@ -442,8 +442,7 @@ class Mask2FormerD2STRHead(RelationHead):
                 relmaps (list[Tensor]): (num_obj, num_obj):
                 target_rel_labels (list[Tensor]): the target relation label.
         """
-        roi_feats, union_feats, det_result = self.frontend_features(
-            img_meta, det_result, gt_result)
+        roi_feats = self.get_bbox_feat(det_result.query_feats)[0]
         if roi_feats.shape[0] == 0:
             return det_result
 
@@ -459,6 +458,9 @@ class Mask2FormerD2STRHead(RelationHead):
         obj_preds = obj_dists[:, 1:].max(1)[1] + 1
 
         # 4. prepare inputs of relation encoder
+        attn_weights = attn_list[-1].detach()
+        union_feats, det_result = self.frontend_features(
+            img_meta, det_result, gt_result, attn_weights)
         rel_inputs = self.prepare_rel_inputs(obj_feats, union_feats,
                                              det_result, num_objs)
 

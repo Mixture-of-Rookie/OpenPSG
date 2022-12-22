@@ -11,6 +11,8 @@ model = dict(
             # NOTE: Evaluation type
             use_gt_box=False,
             use_gt_label=False,
+            use_spatial=False,
+            spatial_size=16,
             obj_layer=4,
             rel_layer=2,
             obj_dim=512,
@@ -20,6 +22,9 @@ model = dict(
             attn_drop=0.1,
             drop_path=0.1,
             rel_mlp_ratio=4.,
+        ),
+        relation_sampler=dict(
+            attn_threshold=0.02,
         ),
     ),
     test_cfg=dict(
