@@ -243,7 +243,7 @@ class RelationSampler(object):
         if self.type == 'Motif':
             sampling_function = self.motif_rel_fg_bg_sampling
         else:
-            raise NotImplementedError
+            sampling_function = self.attn_fg_bg_sampling
         masks, labels = det_result.masks, det_result.labels
         gt_masks, gt_labels, gt_relmaps, gt_rels, gt_keyrels = gt_result.masks, gt_result.labels, gt_result.relmaps,\
                                                                gt_result.rels, gt_result.key_rels
@@ -300,6 +300,76 @@ class RelationSampler(object):
             return rel_labels, rel_idx_pairs, rel_sym_binarys, key_rel_labels
         else:
             return rel_labels, rel_idx_pairs, rel_sym_binarys
+
+    def attn_fg_bg_sampling(self, device, tgt_rel_matrix, tgt_rel,
+                            tgt_keyrel, ious, is_match, rel_possibility,
+                            attn_weight=None):
+        assert attn_weight is not None, "attn_weight must be given in the \
+            attn sampling function"
+
+        rel_possibility = rel_possibility & (
+            attn_weight >= self.attn_threshold).byte()
+        rel_labs = torch.zeros_like(rel_possibility, dtype=torch.int64)
+
+        # assign fg labels
+        tgt_pair_idxs = tgt_rel.long()[:, :2]
+        assert tgt_pair_idxs.shape[1] == 2
+        tgt_head_idxs = tgt_pair_idxs[:, 0].contiguous().view(-1)
+        tgt_tail_idxs = tgt_pair_idxs[:, 1].contiguous().view(-1)
+        tgt_rel_labs = tgt_rel.long()[:, -1].contiguous().view(-1)
+
+        num_tgt_rels = tgt_rel_labs.shape[0]
+        for i in range(num_tgt_rels):
+            tgt_head_idx = int(tgt_head_idxs[i])
+            tgt_tail_idx = int(tgt_tail_idxs[i])
+            tgt_rel_lab = int(tgt_rel_labs[i])
+
+            # find matching pair in proposals (might be more than one)
+            prp_head_idxs = torch.nonzero(is_match[tgt_head_idx]).squeeze(1)
+            prp_tail_idxs = torch.nonzero(is_match[tgt_tail_idx]).squeeze(1)
+            num_match_head = prp_head_idxs.shape[0]
+            num_match_tail = prp_tail_idxs.shape[0]
+            if num_match_head <= 0 or num_match_tail <= 0:
+                continue
+            # all combination pairs
+            prp_head_idxs = prp_head_idxs.view(-1, 1).expand(
+                num_match_head, num_match_tail).contiguous().view(-1)
+            prp_tail_idxs = prp_tail_idxs.view(1, -1).expand(
+                num_match_head, num_match_tail).contiguous().view(-1)
+            valid_pair = prp_head_idxs != prp_tail_idxs
+            if attn_weight is not None:
+                attn_valid = attn_weight[prp_head_idxs, prp_tail_idxs] >= self.attn_threshold
+                valid_pair = attn_valid & valid_pair
+            if valid_pair.sum().item() <= 0:
+                continue
+            # remove self-pair
+            # remove selected pair from rel_possibility
+            prp_head_idxs = prp_head_idxs[valid_pair]
+            prp_tail_idxs = prp_tail_idxs[valid_pair]
+            rel_labs[prp_head_idxs, prp_tail_idxs] = tgt_rel_lab
+            self.num_hit += 1
+
+        self.num_total += num_tgt_rels
+
+        rel_inds = torch.nonzero(rel_possibility > 0).view(-1, 2)
+        head_idxs = rel_inds[:, 0].contiguous().view(-1)
+        tail_idxs = rel_inds[:, 1].contiguous().view(-1)
+        rel_labs = rel_labs[head_idxs, tail_idxs]
+        rel_triplets = torch.cat((rel_inds, rel_labs.view(-1, 1)),
+                                  dim=-1).to(torch.int64)
+
+        # special case
+        if rel_triplets.shape[0] > self.num_rel_per_image:
+            perm = torch.randperm(rel_triplets.shape[0],
+                                  device=device)[:self.num_rel_per_image]
+            rel_triplets = rel_triplets[perm]
+
+        if rel_triplets.shape[0] == 0:
+            col = 3
+            rel_triplets = torch.zeros((1, col),
+                                        dtype=torch.int64,
+                                        device=device)
+        return rel_triplets, None
 
 
     def motif_rel_fg_bg_sampling(self, device, tgt_rel_matrix, tgt_rel,
