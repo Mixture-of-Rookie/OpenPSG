@@ -24,11 +24,11 @@ model = dict(
             rel_mlp_ratio=4.,
         ),
         relation_sampler=dict(
-            attn_threshold=0.02,
+            attn_threshold=0.0,
         ),
     ),
     test_cfg=dict(
-        object_mask_thr=0.8,
+        object_mask_thr=0.6,
         max_per_image=10,
         postprocess='panoptic',
     )

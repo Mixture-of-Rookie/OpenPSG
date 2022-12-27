@@ -547,7 +547,7 @@ class PSGMaskFormerHead(AnchorFreeHead):
         for i in range(len(all_query_feats)):
             all_query_feats[i] = all_query_feats[i].transpose(0, 1)
 
-        use_last_layer = True
+        use_last_layer = False
         if use_last_layer:
             mask_cls_results = all_cls_scores[-1]
             mask_pred_results = all_mask_preds[-1]
@@ -560,9 +560,9 @@ class PSGMaskFormerHead(AnchorFreeHead):
                 mode='bilinear',
                 align_corners=False)
         else:
-            mask_cls_results = all_cls_scores[1:][2::3]
-            mask_pred_results = all_mask_preds[1:][2::3]
-            query_feat_results = all_query_feats[2::3]
+            mask_cls_results = [all_cls_scores[1:][-1]]
+            mask_pred_results = [all_mask_preds[1:][-1]]
+            query_feat_results = [all_query_feats[-1]]
 
             # upsample masks
             img_shape = img_metas[0]['batch_input_shape']
