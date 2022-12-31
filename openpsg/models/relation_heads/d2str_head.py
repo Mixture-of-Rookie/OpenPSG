@@ -5,6 +5,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from mmdet.core import bbox2roi
 from mmdet.models import HEADS
@@ -209,38 +210,18 @@ class Mask2FormerD2STRHead(RelationHead):
     def __init__(self, **kwargs):
         super(Mask2FormerD2STRHead, self).__init__(**kwargs)
 
-        self.bbox_head = nn.Sequential(*[
-            nn.Linear(256, 1024),
-            nn.ReLU(inplace=True),
-            nn.Linear(1024, 1024),
-            nn.ReLU(inplace=True),
-        ])
-
-        self.union_head = nn.Sequential(*[
-            nn.Linear(512, 1024),
-            nn.ReLU(inplace=True),
-            nn.Linear(1024, 1024),
-            nn.ReLU(inplace=True),
-        ])
+        self.bbox_head = nn.Linear(256, 256)
+        self.union_head = nn.Linear(512, 512)
 
         # inputs of object encoder
-        self.embed_dim = self.head_config.embed_dim
         self.hidden_dim = self.head_config.hidden_dim
-        self.in_channels = self.head_config.roi_dim
-        self.label_embed1 = nn.Embedding(self.num_classes, self.embed_dim)
-
-        self.bbox_embed = nn.Sequential(*[
-            nn.Linear(9, 32), nn.ReLU(inplace=True), nn.Dropout(0.1),
-            nn.Linear(32, 128), nn.ReLU(inplace=True), nn.Dropout(0.1),
-        ])
-        self.lin_obj = nn.Linear(self.in_channels + self.embed_dim + 128,
-                                 self.hidden_dim)
 
         # object encoder
         self.obj_encoder = TransformerEncoder(
             n_layer=self.head_config.obj_layer,
             n_dim=self.head_config.obj_dim,
             n_head=self.head_config.num_head,
+            mlp_ratio=self.head_config.obj_mlp_ratio,
             drop=self.head_config.drop,
             attn_drop=self.head_config.attn_drop,
             drop_path=self.head_config.drop_path,
@@ -252,9 +233,8 @@ class Mask2FormerD2STRHead(RelationHead):
         # inputs of relation encoder
         self.rel_dim = self.hidden_dim * 2
         self.lin_rel = nn.Linear(self.hidden_dim, self.rel_dim)
-        self.lin_up_rel = nn.Linear(self.rel_dim, self.in_channels)
-        self.lin_mix = nn.Linear(self.in_channels * 2, self.rel_dim)
-        self.label_embed2 = nn.Embedding(self.num_classes, self.embed_dim)
+        self.lin_up_rel = nn.Linear(self.rel_dim, self.rel_dim)
+        self.lin_mix = nn.Linear(self.rel_dim * 2, self.rel_dim)
 
         # relation encoder
         self.rel_encoder = TransformerEncoder(
@@ -274,9 +254,9 @@ class Mask2FormerD2STRHead(RelationHead):
         self.rel2cxt = nn.Linear(self.rel_dim, self.context_pooling_dim)
         self.vis_decoder = nn.Linear(self.context_pooling_dim, self.num_predicates)
 
-        if self.context_pooling_dim != self.head_config.roi_dim:
+        if self.context_pooling_dim != self.head_config.rel_dim:
             self.union_single_not_match = True
-            self.up_dim = nn.Linear(self.head_config.roi_dim,
+            self.up_dim = nn.Linear(self.head_config.rel_dim,
                                     self.context_pooling_dim)
         else:
             self.union_single_not_match = False
@@ -290,13 +270,6 @@ class Mask2FormerD2STRHead(RelationHead):
 
 
     def init_weights(self):
-        # initialize embedding with glove vector
-        glove_vec = psg_obj_edge_vectors(wv_dir=self.head_config.glove_dir,
-                                         wv_dim=self.embed_dim)
-        with torch.no_grad():
-            self.label_embed1.weight.copy_(glove_vec, non_blocking=True)
-            self.label_embed2.weight.copy_(glove_vec, non_blocking=True)
-
         normal_init(self.lin_rel,
                     mean=0,
                     std=10.0 * (1.0 / self.hidden_dim) ** 0.5)
@@ -458,7 +431,8 @@ class Mask2FormerD2STRHead(RelationHead):
         obj_preds = obj_dists[:, 1:].max(1)[1] + 1
 
         # 4. prepare inputs of relation encoder
-        attn_weights = attn_list[-1].detach()
+        # attn_weights = attn_list[-1].detach()
+        attn_weights = None
         union_feats, det_result = self.frontend_features(
             img_meta, det_result, gt_result, attn_weights)
         rel_inputs = self.prepare_rel_inputs(obj_feats, union_feats,
@@ -500,6 +474,7 @@ class Mask2FormerD2STRHead(RelationHead):
     def prepare_obj_inputs(self, roi_feats, det_result):
         # the inputs of object encoder consists of:
         # 1): roi_feats; 2): bbox embedding; 3): label embeding
+        return roi_feats
         bbox_embeds = self.bbox_embed(encode_box_info(det_result))
 
         obj_dists = torch.cat(det_result.dists, dim=0).detach()
