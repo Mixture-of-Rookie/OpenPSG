@@ -2,7 +2,7 @@ _base_ = [
     '../motifs/segment_mask2former_r50_sgdet_psg.py',
 ]
 
-expt_name = 'd2str_segment_panoptic_0.4_mask2former_r50_bs_8x2_det_sample'
+expt_name = 'd2str_layer8_0.4_mask2former_r50_bs_8x2_det_sample'
 
 model = dict(
     relation_head=dict(
@@ -11,8 +11,6 @@ model = dict(
             # NOTE: Evaluation type
             use_gt_box=False,
             use_gt_label=False,
-            use_spatial=False,
-            spatial_size=16,
             obj_layer=4,
             rel_layer=2,
             hidden_dim=256,
@@ -22,7 +20,7 @@ model = dict(
             drop=0.1,
             attn_drop=0.1,
             drop_path=0.1,
-            obj_mlp_ratio=4.,
+            obj_mlp_ratio=8.,
             rel_mlp_ratio=4.,
             context_pooling_dim=512,
         ),

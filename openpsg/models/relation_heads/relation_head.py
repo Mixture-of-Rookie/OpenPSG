@@ -328,8 +328,9 @@ class RelationHead(BaseModule):
                 target_rel_labels = torch.cat(target_rel_labels, dim=-1)
             if isinstance(rel_scores, (tuple, list)):
                 rel_scores = torch.cat(rel_scores, dim=0)
+            relation_loss_weight = torch.where(target_rel_labels != 0, 5, 1)
             losses['loss_relation'] = self.loss_relation(
-                rel_scores, target_rel_labels)
+                rel_scores, target_rel_labels, weight=relation_loss_weight)
             losses['acc_relation'] = accuracy(rel_scores, target_rel_labels)
 
         if self.with_loss_attention and attn_list is not None:

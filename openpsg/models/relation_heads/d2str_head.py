@@ -261,14 +261,6 @@ class Mask2FormerD2STRHead(RelationHead):
         else:
             self.union_single_not_match = False
 
-        self.use_spatial = self.head_config.use_spatial
-        self.spatial_size = self.head_config.spatial_size
-        if self.use_spatial:
-            self.spatial_lin = nn.Linear(2 * self.spatial_size *
-                                             self.spatial_size,
-                                         self.hidden_dim)
-
-
     def init_weights(self):
         normal_init(self.lin_rel,
                     mean=0,
@@ -287,7 +279,6 @@ class Mask2FormerD2STRHead(RelationHead):
 
     def frontend_features(self, img_meta, det_result, gt_result,
                           attn_weights=None, assigner='mask'):
-        bboxes = det_result.bboxes
         query_feats = det_result.query_feats
 
         if gt_result is not None and gt_result.rels is not None:
@@ -314,11 +305,7 @@ class Mask2FormerD2STRHead(RelationHead):
         det_result.target_rel_labels = rel_labels
         det_result.target_key_rel_labels = key_rel_labels
 
-        union_feats = self.get_relation_feat(query_feats, rel_pair_idxes,
-                                             use_spatial=self.use_spatial,
-                                             bboxes=bboxes,
-                                             img_meta=img_meta,
-                                             spatial_size=self.spatial_size)
+        union_feats = self.get_relation_feat(query_feats, rel_pair_idxes)
 
         return union_feats + (det_result, )
 
@@ -328,59 +315,13 @@ class Mask2FormerD2STRHead(RelationHead):
         return (self.bbox_head(all_query_feats), )
 
 
-    def get_relation_feat(self, query_feats, rel_pair_idxes, use_spatial=False,
-                          bboxes=None, img_meta=None, spatial_size=None):
+    def get_relation_feat(self, query_feats, rel_pair_idxes):
         union_feats = []
         for i, (query_feat, rel_pair_idx) in enumerate(zip(query_feats,
                                                            rel_pair_idxes)):
             head_feat = query_feat[rel_pair_idx[:, 0]]
             tail_feat = query_feat[rel_pair_idx[:, 1]]
             union_feat = torch.cat([head_feat, tail_feat], dim=-1)
-            if use_spatial:
-                bbox = bboxes[i]
-                num_rel = len(rel_pair_idx)
-                dummy_x_range = (torch.arange(spatial_size).to(
-                    rel_pair_idx.device).view(1, 1,
-                                                -1).expand(num_rel, spatial_size,
-                                                           spatial_size))
-                dummy_y_range = (torch.arange(spatial_size).to(
-                    rel_pair_idx.device).view(1, -1,
-                                                1).expand(num_rel, spatial_size,
-                                                          spatial_size))
-                img_shape = torch.tensor(img_meta[i]['img_shape'][:2]).tile(num_rel, 1)
-                img_shape = img_shape.to(bbox)
-
-                # resize bbox to the spatial_size
-                head_bbox = bbox[rel_pair_idx[:, 0]][:, :4]
-                head_bbox[:, 0::2] *= spatial_size / img_shape[:, 1:2]
-                head_bbox[:, 1::2] *= spatial_size / img_shape[:, 0:1]
-                tail_bbox = bbox[rel_pair_idx[:, 1]][:, :4]
-                tail_bbox[:, 0::2] *= spatial_size / img_shape[:, 1:2]
-                tail_bbox[:, 1::2] *= spatial_size / img_shape[:, 0:1]
-
-                head_rect = ((dummy_x_range >= head_bbox[:, 0].floor().view(
-                    -1, 1, 1).long())
-                             & (dummy_x_range <= head_bbox[:, 2].ceil().view(
-                                 -1, 1, 1).long())
-                             & (dummy_y_range >= head_bbox[:, 1].floor().view(
-                                 -1, 1, 1).long())
-                             & (dummy_y_range <= head_bbox[:, 3].ceil().view(
-                                 -1, 1, 1).long())).float()
-                tail_rect = ((dummy_x_range >= tail_bbox[:, 0].floor().view(
-                    -1, 1, 1).long())
-                             & (dummy_x_range <= tail_bbox[:, 2].ceil().view(
-                                 -1, 1, 1).long())
-                             & (dummy_y_range >= tail_bbox[:, 1].floor().view(
-                                 -1, 1, 1).long())
-                             & (dummy_y_range <= tail_bbox[:, 3].ceil().view(
-                                 -1, 1, 1).long())).float()
-
-                rect_input = torch.stack((head_rect, tail_rect),
-                                         dim=1)  # (num_rel, 2, rect_size, rect_size)
-                rect_feat = self.spatial_lin(rect_input.view(rect_input.size(0),
-                                                             -1))
-                union_feat = union_feat + rect_feat
-
             union_feat = self.union_head(union_feat)
             union_feats.append(union_feat)
         return (torch.cat(union_feats, dim=0), )
@@ -420,7 +361,7 @@ class Mask2FormerD2STRHead(RelationHead):
             return det_result
 
         # 1. prepare inputs of object encoder
-        obj_inputs = self.prepare_obj_inputs(roi_feats, det_result)
+        obj_inputs = self.prepare_obj_inputs(roi_feats)
 
         # 2. forward object encoder
         num_objs = [len(b) for b in det_result.bboxes]
@@ -428,7 +369,6 @@ class Mask2FormerD2STRHead(RelationHead):
 
         # 3. forward object decoder
         obj_dists = self.obj_decoder(obj_feats)
-        obj_preds = obj_dists[:, 1:].max(1)[1] + 1
 
         # 4. prepare inputs of relation encoder
         # attn_weights = attn_list[-1].detach()
@@ -471,18 +411,10 @@ class Mask2FormerD2STRHead(RelationHead):
         return det_result
 
 
-    def prepare_obj_inputs(self, roi_feats, det_result):
+    def prepare_obj_inputs(self, roi_feats):
         # the inputs of object encoder consists of:
         # 1): roi_feats; 2): bbox embedding; 3): label embeding
         return roi_feats
-        bbox_embeds = self.bbox_embed(encode_box_info(det_result))
-
-        obj_dists = torch.cat(det_result.dists, dim=0).detach()
-        label_embeds = obj_dists @ self.label_embed1.weight
-
-        obj_inputs = torch.cat((roi_feats, label_embeds, bbox_embeds), -1)
-        obj_inputs = self.lin_obj(obj_inputs)
-        return obj_inputs
 
 
     def prepare_rel_inputs(self, obj_feats, union_feats, det_result, num_objs):
